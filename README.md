@@ -1,6 +1,6 @@
-Perovskite Solar Cell Interactive Simulation
+## Perovskite Solar Cell Interactive Simulation
 
-Overview
+**Overview**
 
 index.html is a self-contained, offline HTML/JavaScript simulation of a planar n–i–p halide-perovskite solar cell. It uses Canvas 2D for the device animation and an energy-level diagram, with no external assets, libraries, or network calls.
 
