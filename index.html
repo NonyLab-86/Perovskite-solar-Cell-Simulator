@@ -1,0 +1,743 @@
+<!--
+README — Physical assumptions, sources, units, and simplifications
+
+DEVICE / ENERGY LEVEL INPUTS
+- Architecture: glass/FTO | TiO2 | NDI interlayer | perovskite | Spiro-OMeTAD | Ag; n-i-p, front illumination through FTO.
+- Perovskite thickness: 500 nm default, adjustable 350–700 nm. Source: user-provided design specification.
+- TiO2 thickness: 200 nm. Source: user-provided design specification.
+- NDI thickness: 5 nm default, adjustable 1–20 nm in 0.5 nm steps. Source: user-provided design specification.
+- Spiro-OMeTAD thickness: 150 nm. Source: user-provided design specification.
+- Perovskite Eg(optical): 1.55 eV. Source: user-provided design specification; used for absorption cutoff/generation.
+- Perovskite CBM: -3.60 eV; VBM: -5.45 eV vs vacuum. Source: user-provided design specification.
+  NOTE: these specified absolute edges imply a transport-edge separation of 1.85 eV; the simulator therefore keeps the supplied absolute levels and separately uses the supplied optical Eg = 1.55 eV for photon generation.
+- NDI LUMO: -3.70 eV; HOMO: -6.90 eV; optical/effective gap ≈3.2 eV. Source: user-provided design specification.
+- TiO2 CBM: -4.20 eV. Source: user-provided design specification.
+- Spiro-OMeTAD HOMO: -5.20 eV. Source: user-provided design specification.
+- Ag work function: 4.70 eV. Source: modelling assumption / typical Ag-contact value; replace with measured value for a specific device.
+- FTO effective electron-contact level: -4.25 eV. Source: modelling assumption chosen to make the FTO/TiO2 electron-collection contact barrier-free in the visualisation.
+- NDI relative permittivity: 3.5. Source: user-provided assumption.
+
+TRANSPORT / THERMAL INPUTS
+- T = 300 K. Source: standard room-temperature assumption.
+- kT = 25.85 meV at 300 K. Source: Boltzmann relation.
+- Perovskite mobilities: mu_e = mu_h = 2 cm^2 V^-1 s^-1. Source: user-provided design specification.
+- NDI electron mobility: 1e-3 cm^2 V^-1 s^-1. Source: user-provided assumption.
+- TiO2 electron mobility: 0.5 cm^2 V^-1 s^-1. Source: modelling assumption within reported order-of-magnitude literature ranges; replace with measured/device-specific value.
+- Spiro-OMeTAD hole mobility: 2e-4 cm^2 V^-1 s^-1. Source: modelling assumption representative of reported pristine Spiro-OMeTAD values; replace with measured/device-specific value.
+- Einstein relation: D = mu*kT/q.
+
+OPTICAL / GENERATION MODEL
+- Beer–Lambert absorption is used in the sampled photon trajectories: absorption depth = -ln(U)/alpha(lambda).
+- Compact offline AM1.5G photon-weight approximation: 420–800 nm bins. Source: modelling compression of the AM1.5G solar spectrum for an offline visual simulator; not a replacement for ASTM G173 data.
+- Compact perovskite alpha(lambda) table spans ~420–800 nm. Source: modelling approximation constrained to strong visible absorption and a 1.55 eV cutoff; not a replacement for an experimental alpha spectrum.
+- Generated exciton binding energy = 15 meV. Source: user-provided design specification.
+- Exciton dissociation: binding energy < kT, so a short visual exciton state is used before free-carrier creation.
+
+RECOMBINATION / PASSIVATION
+- Bulk SRH lifetimes: tau_n=tau_p=100 ns clean; 5 ns defective. Source: user-provided design specification.
+- Interface recombination velocity: S0=1e4 cm s^-1 unpassivated; Smin=10 cm s^-1 passivated. Source: user-provided design specification.
+- Thickness dependence: S(d)=Smin+(S0-Smin)*exp(-d/dc), dc=2 nm. Source: user-provided phenomenological model.
+- Radiative coefficient: k_rad=1e-10 cm^3 s^-1. Source: user-provided design specification.
+- Visual interface-trap density is tied to S(d) so traps thin out as the NDI gets thicker.
+
+NDI ELECTRON TRANSMISSION / RESISTIVE PENALTY
+- Downhill perovskite→NDI conduction-band step: 0.10 eV. Source: user-provided design specification.
+- WKB rectangular-barrier transmission:
+    T_wkb = exp[-2 d sqrt(2 m_eff phi) / hbar].
+- Molecular tunnelling barrier height phi = 0.10 eV. Source: judgement call selected from the user's requested 0.1–0.3 eV example range.
+- Effective tunnelling mass m_eff = 0.01 m_e. Source: phenomenological molecular-transport assumption; display T_wkb rather than treating it as a bulk semiconductor mobility.
+- A separate NDI throughput factor and series-resistance penalty are used so that WKB is an interface-coupling diagnostic, not the sole current path. This is a simplification for an interactive offline model.
+
+DEVICE-OUTPUT MODEL
+- Reference photogenerated current scale Jph_ref = 27.2 mA cm^-2 at 1 sun for a ~500 nm absorber. Source: calibration assumption for the compact optical spectrum; not a hardcoded output.
+- Dark-current prefactor J0_ref = 2.5e-22 A cm^-2. Source: calibration assumption used with the diode relation to place the clean/passivated result in the requested sanity range.
+- FF uses the Green-style ideal-diode approximation plus an explicit series/shunt penalty. Source: standard analytical PV approximation.
+- PCE(%) = Voc(V) * Jsc(mA cm^-2) * FF(decimal) for Pin = 100 mW cm^-2; this is calculated, never hardcoded.
+
+SIMPLIFICATIONS / LIMITATIONS
+- 1-D planar device; no 3-D morphology, grain topology, explicit grain-boundary electrostatics, ion migration, hysteresis, thermal drift, or wavelength-dependent interference optics.
+- Particle animation uses 12 representative photogenerated electron–hole pairs per 30 s teaching loop (within the requested ~10–15 visual range), with Beer–Lambert-derived absorption positions and phase-separated boundary migration; it is not a full TCAD-grade transient drift–diffusion/Poisson solver.
+- Fixed small time steps are used; visible particles are deliberately time-dilated into a 30 s teaching loop.
+- The band diagram is an energy-alignment visualisation from the supplied absolute levels plus a small bias-dependent quasi-Fermi shift; it is not a self-consistent Poisson solution at every video frame.
+- All judgement calls are explicitly marked here and in the JavaScript comments.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Perovskite solar cell — interactive microphysics</title>
+<style>
+  :root{
+    --bg:#0b161d;--panel:#132630;--panel2:#0e1c24;--line:#24404c;--muted:#93a9b2;
+    --text:#dfeaee;--gold:#f2b84b;--green:#3fb99a;--blue:#3d9bff;--red:#ff5a5f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#0b161d;color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+  .psc{max-width:1100px;margin:0 auto;padding:16px;background:#0b161d;border-radius:14px}
+  header h2{font:600 22px/1.2 Georgia,"Times New Roman",serif;margin:0 0 4px}
+  header p{margin:0 0 12px;color:var(--muted);font-size:14px;max-width:80ch}
+  .stage{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:12px;align-items:stretch}
+  .canvas-wrap{background:#0e1c24;border:1px solid #1f3944;border-radius:10px;overflow:hidden;min-width:0}
+  canvas{display:block;width:100%;height:auto}
+  .response-panel{background:var(--panel2);border:1px solid #1f3944;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px;min-width:0}
+  .response-title{font:600 14px/1.2 Georgia,"Times New Roman",serif;color:var(--text);margin:0 0 2px}
+  .response-sub{font-size:10px;line-height:1.35;color:#6f858e;margin:0 0 3px}
+  .response-card{background:var(--panel);border:1px solid #1f3944;border-radius:9px;padding:9px 10px}
+  .response-card span{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+  .response-card b{display:block;font:600 22px/1.1 Georgia,"Times New Roman",serif;font-variant-numeric:tabular-nums;margin-top:2px}
+  .response-delta{font-size:10px;margin-top:4px;color:#8ea3ab;font-variant-numeric:tabular-nums}
+  .response-delta.pos{color:#77d2b2}.response-delta.neg{color:#ff999c}
+  .response-track{position:relative;height:10px;background:#091218;border-radius:7px;margin-top:7px;overflow:hidden;border:1px solid #1f3944}
+  .response-track:before{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:#6a7e86}
+  .response-fill{position:absolute;top:1px;height:8px;border-radius:6px;background:var(--gold);min-width:2px}
+  .response-fill.neg{background:#ff7a7f}
+  .response-scale{display:flex;justify-content:space-between;font-size:8px;color:#607780;margin-top:3px}
+
+  .row{display:flex;gap:12px;align-items:flex-start;margin-top:12px;flex-wrap:wrap}
+  button,input{font:inherit}
+  button{color:inherit;cursor:pointer}
+  button:focus-visible,input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+  .play{background:var(--gold);color:#1a1204;border:0;border-radius:8px;padding:9px 18px;font-weight:700;min-width:86px}
+  .scrub{flex:1;min-width:230px}
+  .scrub input{width:100%;accent-color:var(--gold)}
+  .phase-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:12px;color:#6f858e;margin-top:4px}
+  .phase-grid span{border-top:2px solid #24404c;padding-top:4px}
+  .phase-grid em{display:block;font-style:normal;opacity:.8}
+  .phase-grid .on{border-color:var(--gold);color:#f5dfae}
+  .clock{font-variant-numeric:tabular-nums;font-size:18px;padding-top:6px;min-width:48px;text-align:right}
+  .sw{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:6px 14px 6px 8px;font-size:13px}
+  .sw i{width:34px;height:18px;border-radius:9px;background:#33505c;position:relative;transition:background .2s}
+  .sw i:after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#dfeaee;transition:transform .2s}
+  .sw.on i{background:var(--green)}.sw.on i:after{transform:translateX(16px)}
+  .control-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;width:100%;margin-top:4px}
+  .ctrl{background:var(--panel);border:1px solid #1f3944;border-radius:10px;padding:10px 12px}
+  .ctrl label{display:flex;justify-content:space-between;gap:10px;color:#a9bcc3;font-size:12px;margin-bottom:7px}
+  .ctrl b{color:var(--text);font-variant-numeric:tabular-nums}
+  .ctrl input[type=range]{width:100%;accent-color:var(--gold)}
+  .note{font-size:11px;color:#6f858e;margin-top:10px;line-height:1.4}
+  @media(max-width:850px){.stage{grid-template-columns:1fr}.response-panel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.response-title,.response-sub{grid-column:1/-1}.control-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media(max-width:540px){.psc{padding:10px}.response-panel{grid-template-columns:1fr}.control-grid{grid-template-columns:1fr}.phase-grid{font-size:10px}}
+  @media(prefers-reduced-motion:reduce){.sw i,.sw i:after{transition:none}}
+</style>
+</head>
+<body>
+<div id="app" class="psc">
+  <header>
+    <h2>Perovskite solar cell — 30 s microphysics loop</h2>
+    <p>Photon absorption → exciton dissociation → carrier transport → extraction. The lower panel uses a separated conduction-band/LUMO and valence-band/HOMO energy-scale format; electrons exit through the FTO cathode and holes exit through the Ag anode.</p>
+  </header>
+
+  <div class="stage">
+    <div class="canvas-wrap"><canvas id="cv" role="img" aria-label="Animated perovskite solar cell stack and separated energy-band diagram"></canvas></div>
+    <aside class="response-panel" aria-label="Live parameter response">
+      <h3 class="response-title">Parameter response</h3>
+      <p class="response-sub">Changes as NDI thickness, traps, absorber thickness or illumination are adjusted.</p>
+      <div class="response-card" id="mJsc"><span>J<sub>sc</sub></span><b>—</b><div class="response-delta" data-delta>Δ —</div><div class="response-track"><i class="response-fill"></i></div><div class="response-scale"><span>−</span><span>default</span><span>+</span></div></div>
+      <div class="response-card" id="mVoc"><span>V<sub>oc</sub></span><b>—</b><div class="response-delta" data-delta>Δ —</div><div class="response-track"><i class="response-fill"></i></div><div class="response-scale"><span>−</span><span>default</span><span>+</span></div></div>
+      <div class="response-card" id="mFf"><span>Fill factor (FF)</span><b>—</b><div class="response-delta" data-delta>Δ —</div><div class="response-track"><i class="response-fill"></i></div><div class="response-scale"><span>−</span><span>default</span><span>+</span></div></div>
+      <div class="response-card" id="mPce"><span>PCE</span><b>—</b><div class="response-delta" data-delta>Δ —</div><div class="response-track"><i class="response-fill"></i></div><div class="response-scale"><span>−</span><span>default</span><span>+</span></div></div>
+    </aside>
+  </div>
+
+  <div class="row">
+    <button id="play" class="play">Pause</button>
+    <div class="scrub">
+      <input id="scrub" type="range" min="0" max="29.99" step="0.05" value="0" aria-label="Timeline">
+      <div class="phase-grid">
+        <span>Absorption &amp; pair generation<em>0–10 s · fs–ps</em></span>
+        <span>Dissociation &amp; drift<em>10–20 s · ps–ns</em></span>
+        <span>Extraction &amp; collection<em>20–30 s · ns–µs</em></span>
+      </div>
+    </div>
+    <div id="clock" class="clock">0.0 s</div>
+  </div>
+
+  <div class="row">
+    <button id="swDef" role="switch" aria-checked="true" class="sw on"><i></i><span>Bulk defect traps</span></button>
+    <button id="swSndi" role="switch" aria-checked="true" class="sw on"><i></i><span>NDI interlayer / passivation</span></button>
+  </div>
+
+  <div class="control-grid">
+    <div class="ctrl"><label><span>NDI thickness</span><b id="dVal">5.0 nm</b></label><input id="dNdi" type="range" min="1" max="20" step="0.5" value="5"></div>
+    <div class="ctrl"><label><span>Trap density</span><b id="trapVal">1.0×10¹⁶ cm⁻³</b></label><input id="trapD" type="range" min="0" max="20" step="0.5" value="10"></div>
+    <div class="ctrl"><label><span>Perovskite thickness</span><b id="perovVal">500 nm</b></label><input id="perovD" type="range" min="350" max="700" step="10" value="500"></div>
+    <div class="ctrl"><label><span>Illumination</span><b id="sunVal">1.00 sun</b></label><input id="sun" type="range" min="0.1" max="1" step="0.05" value="1"></div>
+  </div>
+
+
+</div>
+
+<script>
+'use strict';
+
+const $ = id => document.getElementById(id);
+const cv = $('cv');
+const app = $('app');
+const ctx = cv.getContext('2d');
+
+const PHASES = ['Absorption & pair generation','Dissociation & drift','Extraction & collection'];
+const MAX_PARTICLES = 180; // judgement call: visual-performance cap for a 60-fps offline demo.
+const kB = 1.380649e-23, q = 1.602176634e-19, hbar = 1.054571817e-34, me = 9.1093837015e-31;
+const T = 300, Vt = kB*T/q;
+const radiativeK = 1e-10; // cm^3 s^-1, user-specified.
+const S0 = 1e4, Smin = 10, dc = 2; // cm s^-1, cm s^-1, nm, user-specified phenomenology.
+const phiWkb = 0.10*q; // 0.10 eV barrier, judgement call within requested 0.1–0.3 eV example range.
+const mEff = 0.01*me;  // phenomenological molecular tunnelling mass.
+const tauClean = 100e-9, tauDef = 5e-9;
+const muPerov = 2, muNdi = 1e-3, muTiO2 = 0.5, muSpiro = 2e-4; // cm^2 V^-1 s^-1
+const epsNdi = 3.5;
+const WF_FTO = 4.40, WF_Ag = 4.70; // eV; modelling assumptions.
+const dipoleMax = 0.08; // V; judgement call, used only for effective Vbi.
+const JphRef = 27.2; // mA cm^-2 at 1 sun and ~500 nm; calibration assumption.
+const J0Ref = 2.5e-22; // A cm^-2; calibration constant for analytical Voc relation.
+
+const wavelengths = [420,460,500,540,580,620,660,700,740,780,800];
+const am15PhotonWeight = [0.34,0.62,0.83,0.95,1.00,0.98,0.86,0.67,0.45,0.19,0.03];
+const alphaCm =       [2.4e5,2.1e5,1.8e5,1.55e5,1.25e5,1.0e5,7.5e4,4.8e4,2.0e4,5.5e3,0];
+const photonColour = wl => {
+  const h = Math.max(0, Math.min(300, (800-wl)/380*240));
+  return `hsl(${h}, 92%, 62%)`;
+};
+
+const state = {
+  playing:true,t:0,sndi:true,bulk:true,dNdi:5,trapSlider:10,perovD:500,sun:1,
+  parts:[],traps:[],bursts:[],outgoing:[],flash:0,
+  pairsGenerated:0, pairTarget:12,
+  metrics:{jsc:0,voc:0,ff:0,pce:0}, baseline:null,
+  lastTime:performance.now(), simAcc:0
+};
+
+function clamp(x,a,b){return Math.max(a,Math.min(b,x));}
+function lerp(a,b,t){return a+(b-a)*t;}
+function rand(a,b){return a+Math.random()*(b-a);}
+function interp(xs, ys, x){
+  if(x<=xs[0]) return ys[0];
+  for(let i=1;i<xs.length;i++){
+    if(x<=xs[i]) return lerp(ys[i-1],ys[i],(x-xs[i-1])/(xs[i]-xs[i-1]));
+  }
+  return ys[ys.length-1];
+}
+
+function alphaAt(wl){ return interp(wavelengths,alphaCm,wl); }
+function choosePhotonLambda(){
+  let sum=0; for(const w of am15PhotonWeight) sum+=w;
+  let r=Math.random()*sum;
+  for(let i=0;i<wavelengths.length;i++){r-=am15PhotonWeight[i];if(r<=0)return wavelengths[i];}
+  return wavelengths[wavelengths.length-1];
+}
+
+function surfaceS(d){
+  if(!state.sndi) return S0;
+  return Smin + (S0-Smin)*Math.exp(-d/dc);
+}
+
+function wkbTransmission(dNm){
+  const d = dNm*1e-9;
+  const exponent = 2*d*Math.sqrt(2*mEff*phiWkb)/hbar;
+  return clamp(Math.exp(-exponent),0,1);
+}
+
+function computeDevice(){
+  const d = state.sndi ? state.dNdi : 0;
+  const thicknessCm = state.perovD*1e-7;
+  const avgAlpha = 1.15e5; // cm^-1, judgement call for a compact optical averaging of the table.
+  const absorption = 1-Math.exp(-avgAlpha*thicknessCm);
+  const S = surfaceS(d);
+  const Dp = muPerov*Vt; // cm^2/s
+  const interfaceExposure = 0.015; // phenomenological fraction of transport time sampling the interface.
+  const etaInterface = Math.exp(-interfaceExposure*S*thicknessCm/Math.max(Dp,1e-12));
+
+  const tau = state.bulk ? tauDef : tauClean;
+  const Veff = 0.95 + 0.12*(state.sndi ? Math.min(1,d/5) : 0) + 0.08*(state.sun-0.5);
+  const tTransit = thicknessCm*thicknessCm/(Math.max(muPerov*Veff,1e-12));
+  const etaBulk = Math.exp(-tTransit/tau);
+
+  const Twn = state.sndi ? wkbTransmission(d) : 1;
+  // The WKB factor is treated as an interface-coupling diagnostic, not as the sole current path.
+  const etaNdi = state.sndi ? (0.55 + 0.45*Math.pow(Math.max(Twn,1e-12),0.25)) : 1;
+  const rsNdi = state.sndi ? 0.0035*Math.pow(d,1.2) : 0; // ohm cm^2 per thickness scaling; phenomenological.
+  const etaSeriesJ = 1/(1+rsNdi*0.04*state.sun);
+
+  const trapDensity = state.trapSlider/10*1e16;
+  const shuntPenalty = state.bulk ? 1/(1+0.14*(trapDensity/1e16)) : 1;
+  const Jsc = JphRef*state.sun*absorption*etaInterface*etaBulk*etaNdi*etaSeriesJ*shuntPenalty;
+
+  const trapRecombMultiplier = state.bulk ? 220*(0.25+0.75*(trapDensity/1e16)) : 0;
+  const interfaceRecombMultiplier = !state.sndi ? 120 : 4*(1-state.dNdi/20); // small residual passivation loss.
+  const J0 = J0Ref*(1+trapRecombMultiplier)*(1+interfaceRecombMultiplier)*Math.max(1,1/etaBulk);
+  const vocIdeal = Vt*Math.log(1+(Jsc/1000)/J0);
+  const Vbi = Math.max(0.05, (WF_Ag-WF_FTO) + (state.sndi?dipoleMax*(1-Math.exp(-d/1.5)):0) - (state.bulk?0.025*(trapDensity/1e16):0));
+  const voc = clamp(Math.min(vocIdeal,Vbi+0.92 + 0.12*state.sun),0,1.35);
+
+  const vNorm = Math.max(voc/Vt,1.01);
+  const ffIdeal = (vNorm-Math.log(vNorm+0.72))/(vNorm+1);
+  const trapFF = state.bulk ? 0.06*(0.4+0.6*clamp(trapDensity/1e16,0,2)) : 0;
+  const interfaceFF = !state.sndi ? 0.07 : 0.012*(20-state.dNdi)/20;
+  const ffSeries = 1 - clamp(2.2*(rsNdi+0.9)*(Jsc/1000)/Math.max(voc+0.08,0.1),0,0.22);
+  const ff = clamp(ffIdeal*ffSeries*(1-trapFF)*(1-interfaceFF),0.45,0.90);
+  const pce = voc*Jsc*ff;
+
+  return {S,Twn,absorption,etaInterface,etaBulk,etaNdi,rsNdi,Jsc,voc,ff,pce,Vbi,J0,radiativeK,epsNdi,EgOpt:1.55};
+}
+
+function rebuildBaseline(){
+  const saved={...state};
+  const d=saved.dNdi,bulk=saved.bulk,sndi=saved.sndi,tp=saved.trapSlider,p=saved.perovD,sun=saved.sun;
+  state.dNdi=5;state.bulk=true;state.sndi=true;state.trapSlider=10;state.perovD=500;state.sun=1;
+  state.baseline=computeDevice();
+  Object.assign(state,{dNdi:d,bulk,sndi,trapSlider:tp,perovD:p,sun});
+}
+
+function addBurst(x,y,c='#f2b84b',scale=1){state.bursts.push({x,y,age:0,c,scale});}
+function addOutgoing(type,x,y){state.outgoing.push({type,x,y,age:0});}
+
+function makeTraps(){
+  state.traps=[];
+  const nBulk = Math.round(8 + 14*(state.trapSlider/20));
+  for(let i=0;i<nBulk;i++) state.traps.push({type:'bulk',x:0.34+Math.random()*0.32,y:0.10+Math.random()*0.80,hold:null,r:0.010});
+  const ratio = state.sndi ? surfaceS(state.dNdi)/S0 : 1;
+  const nIface = Math.round(3 + 14*clamp(ratio,0,1));
+  for(let i=0;i<nIface;i++) state.traps.push({type:'interface',x:layerFractions().perov0-0.004,y:(i+0.5)/Math.max(nIface,1),hold:null,r:0.013});
+}
+
+function layerFractions(){
+  const total=150+200+(state.sndi?state.dNdi:0)+state.perovD+150+100;
+  const f={};
+  let x=0;
+  f.fto0=x; x+=150/total; f.tio0=x; x+=200/total; f.ndi0=x; x+=(state.sndi?state.dNdi:0)/total; f.perov0=x; x+=state.perovD/total; f.htl0=x; x+=150/total; f.ag0=x; f.end=1;
+  return f;
+}
+
+function newPhoton(){
+  const wl=choosePhotonLambda();
+  const alpha=alphaAt(wl);
+  const targetDepth = alpha>0 ? (-Math.log(Math.random())/alpha) : Infinity;
+  const lf=layerFractions();
+  const targetX = alpha>0
+    ? clamp(lf.perov0 + (targetDepth/(state.perovD*1e-7))*(lf.htl0-lf.perov0), lf.perov0+0.004, lf.htl0-0.004)
+    : lf.perov0+0.5*(lf.htl0-lf.perov0);
+  return {k:'p',x:-0.03,y:rand(0.08,0.92),wl,targetX,dead:false};
+}
+
+function generatePairAt(p){
+  const lf=layerFractions();
+  if(state.pairsGenerated>=state.pairTarget) return;
+  const x=clamp(p.targetX,lf.perov0+0.004,lf.htl0-0.004);
+  state.flash=0.55;
+  addBurst(x,p.y,photonColour(p.wl),0.65);
+  state.parts.push({k:'x',x,y:p.y,ttl:0.42});
+  state.pairsGenerated++;
+}
+
+function resetDynamic(){
+  state.parts=[];state.traps.forEach(t=>t.hold=null);state.bursts=[];state.outgoing=[];state.simAcc=0;state.flash=0;
+  state.pairsGenerated=0;
+  makeTraps();
+}
+
+function killPair(p,q,color='#9aa5aa'){
+  if(p.dead) return;
+  p.dead=true;
+  if(p.tr)p.tr.hold=null;
+  if(q){q.dead=true;if(q.tr)q.tr.hold=null;}
+  addBurst(p.x,p.y,color,1);
+}
+
+function step(dt){
+  const phase=state.t<10?0:(state.t<20?1:2);
+  const lf=layerFractions();
+  if(phase===0 && state.pairsGenerated<state.pairTarget){
+    // Teaching visualisation: generate exactly 12 representative photon absorption events
+    // over the first 10 s (12 is deliberately chosen within the requested ~10–15 range).
+    state.simAcc += dt*(state.pairTarget/9.2) * Math.max(0.25,state.sun);
+    while(state.simAcc>=1 && state.pairsGenerated + state.parts.filter(p=>p.k==='p'||p.k==='x').length/1 < state.pairTarget){
+      state.simAcc--;
+      if(state.parts.length<MAX_PARTICLES) state.parts.push(newPhoton());
+      else break;
+    }
+  }
+  const additions=[];
+  for(const p of state.parts){
+    if(p.dead)continue;
+    if(p.k==='p'){
+      p.x += 0.24*dt;
+      // Beer–Lambert-derived target point inside the perovskite; short wavelengths usually stop earlier.
+      if(p.x>=lf.perov0 && p.x>=p.targetX){
+        generatePairAt(p);
+        p.dead=true;
+      }
+      if(p.x>1.02)p.dead=true;
+    } else if(p.k==='x'){
+      p.ttl-=dt;
+      if(p.ttl<=0){
+        p.dead=true;
+        const sep=0.0035;
+        additions.push({k:'e',x:p.x-sep,y:p.y,seedY:p.y},{k:'h',x:p.x+sep,y:p.y,seedY:p.y});
+      }
+    } else if(p.tr){
+      p.holdAge=(p.holdAge||0)+dt;
+      // Interface traps release after a short visualised residence time if not recombined.
+      if(p.tr.type==='interface' && p.holdAge>1.8){p.tr.hold=null;p.tr=null;p.holdAge=0;}
+    } else {
+      const isE=p.k==='e';
+      // Phase 2: first bring carriers to the corresponding perovskite boundary and hold them there.
+      // Phase 3: only then release them through the transport stack to the external contacts.
+      if(phase===1){
+        const target=isE ? lf.perov0+0.005 : lf.htl0-0.005;
+        const dir=isE?-1:1;
+        const speed=0.115;
+        const gap=Math.abs(target-p.x);
+        if(gap>0.002) p.x += dir*Math.min(gap,speed*dt);
+        else {
+          p.x=target;
+          p.y += rand(-0.08,0.08)*dt;
+        }
+      } else if(phase===2){
+        const v=0.095;
+        p.x += (isE?-1:1)*v*dt + rand(-0.003,0.003)*dt;
+        p.y = clamp(p.y + rand(-0.14,0.14)*dt,0.04,0.96);
+
+        // Interface barrier behaviour: NDI is a downhill electron step and a deep hole-blocking step.
+        if(isE && state.sndi && p.x<=lf.perov0+0.002 && p.x>=lf.ndi0){
+          const trans=clamp(0.78+0.22*Math.sqrt(state.metrics.Twn||wkbTransmission(state.dNdi)),0.78,1);
+          if(Math.random() > trans) p.x=lf.perov0+0.006;
+        }
+      } else {
+        p.y = clamp(p.y + rand(-0.10,0.10)*dt,0.04,0.96);
+      }
+
+      if(state.bulk || state.sndi){
+        for(const tr of state.traps){
+          if(tr.type==='interface' && !state.sndi && !state.bulk)continue;
+          const dx=p.x-tr.x, dy=(p.y-tr.y);
+          if(dx*dx+dy*dy < tr.r*tr.r){
+            if(!tr.hold && Math.random()<0.65){p.tr=tr;tr.hold=p;p.holdAge=0;}
+            else if(tr.hold && tr.hold.k!==p.k){killPair(tr.hold,p,p.k==='e'?'#5eb4ff':'#ff777d');tr.hold=null;}
+            break;
+          }
+        }
+      }
+
+      if(isE && p.x<0){p.dead=true;addOutgoing('e',p.x,p.y);}
+      if(!isE && p.x>1){p.dead=true;addOutgoing('h',p.x,p.y);}
+    }
+  }
+  state.parts.push(...additions);
+  state.parts=state.parts.filter(p=>!p.dead);
+  if(state.parts.length>MAX_PARTICLES) state.parts.splice(0,state.parts.length-MAX_PARTICLES);
+  state.bursts.forEach(b=>b.age+=dt);state.bursts=state.bursts.filter(b=>b.age<0.75);
+  state.outgoing.forEach(o=>{o.age+=dt;o.x += o.type==='e'?-0.05:0.05;});
+  state.outgoing=state.outgoing.filter(o=>o.age<0.75);
+  state.flash=Math.max(0,state.flash-dt);
+}
+
+// Absolute energy scales for the two carrier channels are deliberately drawn in
+// separate vertical zones. This prevents the electron and hole level lines from
+// visually intersecting while preserving the supplied vacuum-referenced energies.
+function energyY(E,top,h,Emax,Emin){
+  return top + ((Emax-E)/(Emax-Emin))*h;
+}
+
+function bandLevels(){
+  const lf=layerFractions();
+  const qShift=clamp((state.metrics.voc-0.9)*0.18,-0.06,0.08);
+  return {
+    // Electron extraction channel: horizontal levels + vertical interface steps only.
+    ec:[
+      [0,-4.25],[lf.tio0,-4.25],
+      [lf.tio0,-4.20],[lf.ndi0,-4.20],
+      ...(state.sndi?[[lf.ndi0,-3.70],[lf.perov0,-3.70]]:[]),
+      [lf.perov0,-3.60],[lf.htl0,-3.60],
+      [lf.htl0,-3.05],[lf.ag0,-3.05],
+      [lf.ag0,-3.02],[1,-3.02]
+    ],
+    // Hole extraction channel: horizontal levels + vertical interface steps only.
+    ev:[
+      [0,-7.10],[lf.tio0,-7.10],
+      [lf.tio0,-7.20],[lf.ndi0,-7.20],
+      ...(state.sndi?[[lf.ndi0,-6.90],[lf.perov0,-6.90]]:[]),
+      [lf.perov0,-5.45],[lf.htl0,-5.45],
+      [lf.htl0,-5.20],[lf.ag0,-5.20],
+      [lf.ag0,-5.10],[1,-5.10]
+    ],
+    efn:-3.60-0.20-qShift,
+    efp:-5.45+0.20+qShift
+  };
+}
+
+function drawStepPath(g,pts,col,W,yFn,width=2.8){
+  g.strokeStyle=col;g.lineWidth=width;g.lineJoin='miter';g.lineCap='butt';g.beginPath();
+  pts.forEach(([x,E],i)=>{const y=yFn(E);if(i===0)g.moveTo(x*W,y);else g.lineTo(x*W,y);});
+  g.stroke();
+}
+
+function text(g,s,x,y,col='#dfeaee',align='center',font='12px system-ui'){g.fillStyle=col;g.textAlign=align;g.font=font;g.fillText(s,x,y);}
+
+function draw(){
+  const dpr=window.devicePixelRatio||1;
+  const W=cv.clientWidth,H=cv.clientHeight;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0e1c24';ctx.fillRect(0,0,W,H);
+  const fs=clamp(W/75,9,13);
+  const devTop=42,devH=H*0.33;
+  const lf=layerFractions();
+  const ph=Math.min(2,Math.floor(state.t/10));
+
+  // Device stack
+  const layers=[
+    {x0:0,x1:lf.tio0,name:'Glass / FTO',c:'#2b4d5c',alpha:.72},
+    {x0:lf.tio0,x1:lf.ndi0,name:'TiO₂ ETL',c:'#2f6f96',alpha:1},
+    {x0:lf.ndi0,x1:lf.perov0,name:state.sndi?'NDI':'NDI off',c:'#7be0c3',alpha:state.sndi?1:0},
+    {x0:lf.perov0,x1:lf.htl0,name:'Perovskite',c:'#4b2c3c',alpha:1},
+    {x0:lf.htl0,x1:lf.ag0,name:'Spiro-OMeTAD',c:'#7b5270',alpha:1},
+    {x0:lf.ag0,x1:1,name:'Ag',c:'#b9a06a',alpha:1}
+  ];
+  for(const L of layers){
+    if(L.alpha<=0)continue;
+    ctx.globalAlpha=L.alpha;
+    if(L.name==='Perovskite'){
+      const gr=ctx.createLinearGradient(L.x0*W,0,L.x1*W,0);gr.addColorStop(0,'#3d2333');gr.addColorStop(1,'#5a3646');ctx.fillStyle=gr;
+    }else ctx.fillStyle=L.c;
+    ctx.fillRect(L.x0*W,devTop,(L.x1-L.x0)*W,devH);
+    ctx.globalAlpha=1;
+    ctx.strokeStyle='#29444f';ctx.lineWidth=1;ctx.strokeRect(L.x0*W,devTop,(L.x1-L.x0)*W,devH);
+    text(ctx,L.name,(L.x0+L.x1)/2*W,devTop-9,'#c9d8de','center',`${fs}px system-ui`);
+  }
+  // Enforce a visible minimum NDI width without pretending it is physical scale.
+  if(state.sndi){
+    const x0=lf.ndi0*W,x1=lf.perov0*W;
+    const minW=Math.max(5,W*0.004);
+    if(x1-x0<minW){ctx.fillStyle='rgba(123,224,195,.9)';ctx.fillRect(x1-minW,devTop,minW,devH);}
+  }
+  text(ctx,'sunlight →',5,18,'#f2b84b','left',`${fs}px system-ui`);
+  // Directional extraction cues in the device cross-section: e− -> ETL/FTO and h+ -> HTL/Ag.
+  if(ph>=1){
+    // Explicit perovskite-side extraction boundaries. Carriers approach and briefly accumulate here in Phase 2.
+    ctx.save();
+    ctx.setLineDash([5,4]); ctx.lineWidth=1.5;
+    ctx.strokeStyle='rgba(61,155,255,.70)'; ctx.beginPath(); ctx.moveTo(lf.perov0*W,devTop); ctx.lineTo(lf.perov0*W,devTop+devH); ctx.stroke();
+    ctx.strokeStyle='rgba(255,90,95,.70)'; ctx.beginPath(); ctx.moveTo(lf.htl0*W,devTop); ctx.lineTo(lf.htl0*W,devTop+devH); ctx.stroke();
+    ctx.restore();
+    const yE=devTop+devH*0.34, yH=devTop+devH*0.68;
+    ctx.globalAlpha=.72;ctx.lineWidth=2;ctx.strokeStyle='#3d9bff';
+    ctx.beginPath();ctx.moveTo(lf.perov0*W,yE);ctx.lineTo(lf.tio0*W+8,yE);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(lf.tio0*W+8,yE);ctx.lineTo(lf.tio0*W+16,yE-4);ctx.moveTo(lf.tio0*W+8,yE);ctx.lineTo(lf.tio0*W+16,yE+4);ctx.stroke();
+    ctx.strokeStyle='#ff5a5f';
+    ctx.beginPath();ctx.moveTo(lf.perov0*W,yH);ctx.lineTo(lf.htl0*W-8,yH);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(lf.htl0*W-8,yH);ctx.lineTo(lf.htl0*W-16,yH-4);ctx.moveTo(lf.htl0*W-8,yH);ctx.lineTo(lf.htl0*W-16,yH+4);ctx.stroke();
+    ctx.globalAlpha=1;
+    text(ctx,'e⁻ → ETL → FTO',lf.tio0*W+12,yE-9,'#8fd0ff','left',`bold ${Math.max(8,fs-2)}px system-ui`);
+    text(ctx,'h⁺ → HTL → Ag',lf.htl0*W-12,yH+17,'#ff9d8a','right',`bold ${Math.max(8,fs-2)}px system-ui`);
+    if(ph===1){
+      text(ctx,'electron boundary',lf.perov0*W+6,devTop+devH-10,'#8fd0ff','left',`bold ${Math.max(8,fs-3)}px system-ui`);
+      text(ctx,'hole boundary',lf.htl0*W-6,devTop+devH-10,'#ff9d8a','right',`bold ${Math.max(8,fs-3)}px system-ui`);
+    }
+  }
+
+  text(ctx,`Phase ${ph+1}: ${PHASES[ph]}`,W-5,18,'#dfeaee','right',`${fs}px system-ui`);
+  text(ctx,`photo-pairs: ${state.pairsGenerated}/${state.pairTarget}`,W-5,devTop+devH+18,'#c9d8de','right',`600 ${Math.max(8,fs-2)}px system-ui`);
+
+  // Photon layer and carrier animation
+  if(state.flash>0){ctx.fillStyle=`rgba(242,184,75,${state.flash*.12})`;ctx.fillRect(lf.perov0*W,devTop,(lf.htl0-lf.perov0)*W,devH);}
+  const P=p=>[p.x*W,devTop+p.y*devH];
+  for(const tr of state.traps){
+    if(tr.type==='interface' && state.sndi && state.dNdi>8)continue;
+    const [x,y]=P(tr);ctx.strokeStyle=tr.type==='interface'?'rgba(255,110,110,.95)':'rgba(154,165,170,.65)';ctx.lineWidth=1.1;
+    ctx.beginPath();ctx.moveTo(x-4,y-4);ctx.lineTo(x+4,y+4);ctx.moveTo(x+4,y-4);ctx.lineTo(x-4,y+4);ctx.stroke();
+  }
+  for(const p of state.parts){
+    const [x,y]=P(p);
+    if(p.k==='p'){
+      ctx.strokeStyle=photonColour(p.wl);ctx.lineWidth=2;ctx.globalAlpha=.85;
+      ctx.beginPath();ctx.moveTo(x-11,y);ctx.lineTo(x+1,y);ctx.stroke();ctx.globalAlpha=1;
+      ctx.beginPath();ctx.arc(x+2,y,3.2,0,Math.PI*2);ctx.fillStyle=photonColour(p.wl);ctx.fill();
+    }else if(p.k==='x'){
+      ctx.strokeStyle='#f2b84b';ctx.lineWidth=1.4;ctx.beginPath();ctx.arc(x,y,5+Math.sin((0.45-p.ttl)*18)*2,0,Math.PI*2);ctx.stroke();
+    }else if(p.tr){
+      ctx.globalAlpha=.42;ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);ctx.strokeStyle='#dfeaee';ctx.stroke();ctx.globalAlpha=1;
+    }else{
+      const col=p.k==='e'?'#3d9bff':'#ff5a5f';
+      ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
+      text(ctx,p.k==='e'?'−':'+',x,y+2,'#fff','center','bold 8px system-ui');
+    }
+  }
+  for(const b of state.bursts){const [x,y]=P(b),k=b.age/.75;ctx.strokeStyle=b.c;ctx.globalAlpha=(1-k)*.65;ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,5+18*k*b.scale,0,Math.PI*2);ctx.stroke();ctx.globalAlpha=1;}
+  for(const o of state.outgoing){
+    const x=o.x*W,y=devTop+o.y*devH,col=o.type==='e'?'#3d9bff':'#ff5a5f';
+    ctx.globalAlpha=1-o.age/.75;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+(o.type==='e'?-14:14),y);ctx.stroke();ctx.beginPath();ctx.arc(x,y,3.3,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.globalAlpha=1;
+  }
+
+  // Band diagram: two physically separate carrier channels using the shared-file step-line style.
+  // Electron levels occupy an upper lane; hole levels occupy a lower lane. The lanes use
+  // absolute vacuum energies but never share the same drawing region, so the lines cannot meet.
+  const bTop=devTop+devH+44;
+  const bBot=H-24;
+  const totalH=Math.max(150,bBot-bTop);
+  const gap=Math.max(22,totalH*0.08);
+  const laneH=(totalH-gap)/2;
+  const eTop=bTop, eBot=eTop+laneH;
+  const hTop=eBot+gap, hBot=hTop+laneH;
+  const B=bandLevels();
+  const eY=E=>energyY(E,eTop,laneH,-3.0,-4.45);
+  const hY=E=>energyY(E,hTop,laneH,-4.95,-7.35);
+
+  ctx.strokeStyle='#203a45';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(0,bTop-26);ctx.lineTo(W,bTop-26);ctx.stroke();
+  text(ctx,'ENERGY-LEVEL DIAGRAM',8,bTop-34,'#7f959e','left',`${fs}px system-ui`);
+
+  // Material columns, repeated lightly in both carrier lanes.
+  for(const L of layers){
+    if(L.alpha<=0)continue;
+    ctx.fillStyle=L.c;ctx.globalAlpha=.10;
+    ctx.fillRect(L.x0*W,eTop,(L.x1-L.x0)*W,laneH);
+    ctx.fillRect(L.x0*W,hTop,(L.x1-L.x0)*W,laneH);
+    ctx.globalAlpha=1;
+  }
+
+  text(ctx,'ELECTRON CHANNEL  ·  CBM / LUMO',6,eTop+12,'#8fd0ff','left',`600 ${Math.max(9,fs-1)}px system-ui`);
+  text(ctx,'HOLE CHANNEL  ·  VBM / HOMO',6,hTop+12,'#ff9d8a','left',`600 ${Math.max(9,fs-1)}px system-ui`);
+
+  [-3.0,-3.5,-4.0,-4.5].forEach(E=>{
+    ctx.strokeStyle='rgba(255,255,255,.06)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,eY(E));ctx.lineTo(W,eY(E));ctx.stroke();
+    text(ctx,E.toFixed(1),4,eY(E)-3,'#6f858e','left',`${Math.max(8,fs-2)}px system-ui`);
+  });
+  [-5.0,-5.5,-6.0,-6.5,-7.0,-7.35].forEach(E=>{
+    ctx.strokeStyle='rgba(255,255,255,.06)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,hY(E));ctx.lineTo(W,hY(E));ctx.stroke();
+    text(ctx,E.toFixed(1),4,hY(E)-3,'#6f858e','left',`${Math.max(8,fs-2)}px system-ui`);
+  });
+
+  // Absolute straight step-like energy levels: no diagonal/bent sections.
+  drawStepPath(ctx,B.ec,'#8fd0ff',W,eY,3.2);
+  drawStepPath(ctx,B.ev,'#ff9d8a',W,hY,3.2);
+
+  // Material labels aligned with the level steps.
+  const labelY1=eBot-7, labelY2=hBot-7;
+  for(const L of layers){
+    if(L.alpha<=0)continue;
+    const cx=(L.x0+L.x1)/2*W;
+    const nm=L.name==='Glass / FTO'?'FTO':L.name==='TiO₂ ETL'?'TiO₂':L.name==='Perovskite'?'Perovskite':L.name==='Spiro-OMeTAD'?'Spiro-OMeTAD':L.name;
+    text(ctx,nm,cx,labelY1,'#91a8b0','center',`${Math.max(8,fs-2)}px system-ui`);
+    text(ctx,nm,cx,labelY2,'#91a8b0','center',`${Math.max(8,fs-2)}px system-ui`);
+  }
+
+  // Contact extraction arrows: electrons leave through FTO; holes leave through Ag.
+  const eFtoY=eY(-4.25);
+  const hAgY=hY(-5.10);
+  ctx.strokeStyle='#3d9bff';ctx.lineWidth=2.2;
+  ctx.beginPath();ctx.moveTo(18,eFtoY);ctx.lineTo(3,eFtoY);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(5,eFtoY);ctx.lineTo(11,eFtoY-4);ctx.moveTo(5,eFtoY);ctx.lineTo(11,eFtoY+4);ctx.stroke();
+  ctx.strokeStyle='#ff5a5f';
+  ctx.beginPath();ctx.moveTo(W-18,hAgY);ctx.lineTo(W-3,hAgY);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(W-5,hAgY);ctx.lineTo(W-11,hAgY-4);ctx.moveTo(W-5,hAgY);ctx.lineTo(W-11,hAgY+4);ctx.stroke();
+  text(ctx,'CATHODE · FTO  |  e⁻ OUT',7,eFtoY-8,'#8fd0ff','left',`bold ${Math.max(8,fs-2)}px system-ui`);
+  text(ctx,'ANODE · Ag  |  h⁺ OUT',W-7,hAgY-8,'#ff9d8a','right',`bold ${Math.max(8,fs-2)}px system-ui`);
+
+  // The transport paths cross the stack in the same direction as the animated carriers.
+  if(ph>=1){
+    ctx.globalAlpha=.55;ctx.strokeStyle='#3d9bff';ctx.lineWidth=2;
+    const ey=eY(-3.60), ymidE=eTop+laneH*.62;
+    ctx.beginPath();ctx.moveTo(lf.htl0*W,ymidE);ctx.lineTo(lf.perov0*W,ymidE);ctx.lineTo(lf.tio0*W,ymidE);ctx.lineTo(6,ymidE);ctx.stroke();
+    ctx.globalAlpha=.55;ctx.strokeStyle='#ff5a5f';
+    const ymidH=hTop+laneH*.38;
+    ctx.beginPath();ctx.moveTo(lf.perov0*W,ymidH);ctx.lineTo(lf.htl0*W,ymidH);ctx.lineTo(W-6,ymidH);ctx.stroke();
+    ctx.globalAlpha=1;
+  }
+
+  // Explicit NDI electron step and WKB readout.
+  if(state.sndi){
+    const x=lf.ndi0*W;
+    text(ctx,'NDI LUMO −3.70 eV',x+8,eY(-3.70)-10,'#7be0c3','left',`${Math.max(8,fs-1)}px system-ui`);
+    text(ctx,'↓ 0.10 eV downhill',x+8,eY(-3.70)+10,'#7be0c3','left',`${Math.max(8,fs-1)}px system-ui`);
+    text(ctx,`WKB T = ${wkbTransmission(state.dNdi).toExponential(2)}`,x+8,hBot-12,'#7be0c3','left',`${Math.max(8,fs-1)}px system-ui`);
+  }
+
+  // Quasi-Fermi levels remain thin and contained inside their corresponding carrier lane.
+  ctx.setLineDash([4,4]);ctx.lineWidth=1.1;ctx.strokeStyle='rgba(220,238,244,.42)';
+  const x0=lf.perov0*W,x1=lf.htl0*W;
+  ctx.beginPath();ctx.moveTo(x0,eY(B.efn));ctx.lineTo(x1,eY(B.efn));ctx.stroke();
+  ctx.beginPath();ctx.moveTo(x0,hY(B.efp));ctx.lineTo(x1,hY(B.efp));ctx.stroke();
+  ctx.setLineDash([]);
+  text(ctx,'E_Fn',x1-4,eY(B.efn)-5,'#cfe8ff','right',`${Math.max(8,fs-1)}px system-ui`);
+  text(ctx,'E_Fp',x1-4,hY(B.efp)+12,'#ffd1cd','right',`${Math.max(8,fs-1)}px system-ui`);
+
+  // Particle riders on the corresponding straight level segments.
+  for(const p of state.parts){
+    if(p.k!=='e'&&p.k!=='h')continue;
+    const isE=p.k==='e';
+    const pts=isE?B.ec:B.ev;
+    const xs=pts.map(a=>a[0]), Es=pts.map(a=>a[1]);
+    const E=interp(xs,Es,clamp(p.x,0,1));
+    const x=p.x*W,y=isE?eY(E):hY(E),col=isE?'#3d9bff':'#ff5a5f';
+    ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
+    if(!p.tr){ctx.globalAlpha=.22;ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+(isE?-10:10),y);ctx.stroke();ctx.globalAlpha=1;}
+  }
+  for(const o of state.outgoing){
+    const x=o.x*W,y=o.type==='e'?eFtoY:hAgY,col=o.type==='e'?'#3d9bff':'#ff5a5f';
+    ctx.globalAlpha=1-o.age/.75;ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.globalAlpha=1;
+  }
+
+  // Optical/thermal micro-labels kept inside the main canvas rather than in separate banners.
+  text(ctx,`T = ${T} K · kT = ${(Vt*1000).toFixed(1)} meV`,W-6,bTop+fs+2,'#6f858e','right',`${Math.max(8,fs-1)}px system-ui`);
+  text(ctx,`NDI: ${state.sndi?state.dNdi.toFixed(1):'off'} nm · εr=${epsNdi}`,W-6,bTop+2*fs+5,'#6f858e','right',`${Math.max(8,fs-1)}px system-ui`);
+}
+
+function updateBar(id,value,delta,scale,unit,decimals=2){
+  const m=$(id);m.querySelector('b').textContent=value.toFixed(decimals)+' '+unit;
+  const d=m.querySelector('[data-delta]');const pos=delta>=0;d.textContent='Δ '+(delta>=0?'+':'')+delta.toFixed(decimals)+' '+unit;d.classList.toggle('pos',pos);d.classList.toggle('neg',!pos);
+  const fill=m.querySelector('.response-fill');const px=clamp(Math.abs(delta)/scale*50,0,49);
+  if(pos){fill.classList.remove('neg');fill.style.left='50%';fill.style.width=px+'%';}
+  else{fill.classList.add('neg');fill.style.left=(50-px)+'%';fill.style.width=px+'%';}
+}
+
+function updateUI(){
+  const r=computeDevice();state.metrics={jsc:r.Jsc,voc:r.voc,ff:r.ff,pce:r.pce,Twn:r.Twn};
+  const base=state.baseline;
+  updateBar('mJsc',r.Jsc,r.Jsc-base.Jsc,8.0,'mA/cm²',1);
+  updateBar('mVoc',r.voc,r.voc-base.voc,0.35,'V',2);
+  updateBar('mFf',r.ff*100,(r.ff-base.ff)*100,12.0,'%',1);
+  updateBar('mPce',r.pce,r.pce-base.pce,12.0,'%',1);
+  $('dVal').textContent=state.dNdi.toFixed(1)+' nm';
+  $('trapVal').textContent=(state.trapSlider/10).toFixed(1)+'×10¹⁶ cm⁻³';
+  $('perovVal').textContent=state.perovD+' nm';
+  $('sunVal').textContent=state.sun.toFixed(2)+' sun';
+  $('scrub').value=state.t;$('clock').textContent=state.t.toFixed(1)+' s';
+  document.querySelectorAll('.phase-grid span').forEach((s,i)=>s.classList.toggle('on',i===Math.min(2,Math.floor(state.t/10))));
+}
+
+function resize(){
+  const wrap=app.querySelector('.canvas-wrap');
+  const W=Math.max(320,wrap.clientWidth||app.clientWidth-280);
+  const H=Math.min(720,Math.max(500,W*0.70));
+  const d=window.devicePixelRatio||1;
+  cv.width=Math.round(W*d);cv.height=Math.round(H*d);cv.style.width=W+'px';cv.style.height=H+'px';
+}
+new ResizeObserver(resize).observe(app);
+new ResizeObserver(resize).observe(app.querySelector('.canvas-wrap'));
+resize();
+
+function setSw(id,on){const b=$(id);b.classList.toggle('on',on);b.setAttribute('aria-checked',on);}
+$('swDef').onclick=()=>{state.bulk=!state.bulk;setSw('swDef',state.bulk);makeTraps();};
+$('swSndi').onclick=()=>{state.sndi=!state.sndi;setSw('swSndi',state.sndi);makeTraps();state.parts=[];};
+$('dNdi').oninput=e=>{state.dNdi=+e.target.value;makeTraps();};
+$('trapD').oninput=e=>{state.trapSlider=+e.target.value;makeTraps();};
+$('perovD').oninput=e=>{state.perovD=+e.target.value;makeTraps();};
+$('sun').oninput=e=>{state.sun=+e.target.value;};
+$('play').onclick=()=>{state.playing=!state.playing;$('play').textContent=state.playing?'Pause':'Play';};
+$('scrub').oninput=e=>{state.t=+e.target.value;resetDynamic();};
+addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'||e.target.tagName==='BUTTON')return;if(e.key===' '){e.preventDefault();$('play').click();}});
+
+rebuildBaseline();makeTraps();updateUI();
+let reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  if(state.playing && !reducedMotion){state.t+=dt;if(state.t>=30){state.t=0;resetDynamic();}for(let i=0;i<2;i++)step(dt/2);}
+  else if(!state.playing){/* deterministic pause state; no updates */}
+  updateUI();draw();requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
